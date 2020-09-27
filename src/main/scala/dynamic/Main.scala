@@ -1,26 +1,22 @@
 package dynamic
 
 object Main extends App {
-  def absMin(in: Array[Int]): (Int, List[Boolean]) = {
-    if (in.isEmpty) (0, Nil) else {
-      val inList = in.toList
-      val plus = minRec(inList.head, inList.tail, true :: Nil)
-      val minus = minRec(-inList.head, inList.tail, false :: Nil)
-      if (Math.abs(plus._1) < Math.abs(minus._1)) (plus._1, plus._2.reverse) else (minus._1, minus._2.reverse)
-    }
+
+  class Result(val minAbsSum: Int, val signs: List[Boolean]) {
+    override def toString: String = s"Result($minAbsSum, $signs)"
   }
 
-  def minRec(accumulator: Int, list: List[Int], binars: List[Boolean]): (Int, List[Boolean]) = {
-    list match {
-      case Nil => (accumulator, binars)
-      case _ =>
-        val plus = minRec(accumulator + list.head, list.tail, true :: binars)
-        val minus = minRec(accumulator - list.head, list.tail, false :: binars)
-        if (Math.abs(plus._1) < Math.abs(minus._1)) plus else minus
-    }
+  def minAbsSum(a: Seq[Int]): Result = minAbsSumRec(0, a, Nil)
+
+  private def minAbsSumRec(minAbsSum: Int, a: Seq[Int], signs: List[Boolean]): Result = a match {
+    case Nil => new Result(minAbsSum, signs)
+    case _ =>
+      val withPlus = minAbsSumRec(minAbsSum + a.head, a.tail, true :: signs)
+      val withMinus = minAbsSumRec(minAbsSum - a.head, a.tail, false :: signs)
+      if (Math.abs(withPlus.minAbsSum) < Math.abs(withMinus.minAbsSum)) withPlus else withMinus
   }
 
-  println(absMin(Array(1, 5, 2, 2, 11)))
+  println(minAbsSum(Array(1, -5, 2, 2, 11)))
 }
 
 
