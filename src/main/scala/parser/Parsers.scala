@@ -19,11 +19,11 @@ object Parsers extends App {
 //  println(consumeMultipleAnyOf(Colon.getClass, classOf[Letter])(tokenize(":aaaaa_")))
 //  println
 //
-//  println(ParserCalc.parse(tokenize("a"), ParserCalc.parseIdentifier))
-//  println(ParserCalc.parse(tokenize("ala9_2"), ParserCalc.parseIdentifier))
-//  println(ParserCalc.parse(tokenize("ala9_2:"), ParserCalc.parseIdentifier))
-//  println(ParserCalc.parse(tokenize(":ala9_2"), ParserCalc.parseIdentifier))
-//  println
+  println(ParserCalc.parse(tokenize("a"), ParserCalc.parseIdentifier))
+  println(ParserCalc.parse(tokenize("ala9_2"), ParserCalc.parseIdentifier))
+  println(ParserCalc.parse(tokenize("ala9_2:"), ParserCalc.parseIdentifier))
+  println(ParserCalc.parse(tokenize(":ala9_2"), ParserCalc.parseIdentifier))
+  println
 //
 //  println(ParserCalc.parse(tokenize("Unit"), ParserCalc.parseType))
 //  println(ParserCalc.parse(tokenize("Int"), ParserCalc.parseType))
@@ -100,20 +100,20 @@ object Parsers extends App {
 object ParserCalc {
   //
   // rules
-  val parseIdentifier: Parser = new ThenParser(consumeSingle[Letter], consumeMultipleAnyOfDepr(classOf[Letter], classOf[Digit], Underscore.getClass)_)
+  val parseIdentifier: Parser = thenConsume(consumeSingle[Letter], consumeMultipleAnyOf(consumeSingle[Letter], consumeSingle[Digit], consumeSingle[Underscore.type])_)_
   val parseType: Parser = consumeSingleAnyOf(UnitKeyword.getClass, IntKeyword.getClass)_
-  val parseArg: Parser = new ThenParser(new ThenParser(parseIdentifier, consumeSingle[Colon.type]), parseType) //TODO double TODO
-  val parseArgs: Parser = new ThenParserN(parseArg, consumeMultipleAnyOf(new ThenParser (consumeSingle[Comma.type], parseArg))_)
-  val parseFunction: Parser = new ThenParserN(
-    consumeSingle[DefKeyword.type], consumeMultipleAnyOfDepr(Whitespace.getClass)_, parseIdentifier,
+  val parseArg: Parser = thenConsume(parseIdentifier, consumeSingle[Colon.type], parseType)_
+  val parseArgs: Parser = thenConsume(parseArg, consumeMultipleAnyOf(thenConsume(consumeSingle[Comma.type], parseArg)_)_)_
+  val parseFunction: Parser = thenConsume(
+    consumeSingle[DefKeyword.type], consumeMultipleAnyOf(consumeSingle[Whitespace.type])_, parseIdentifier,
     consumeSingle[LParenthesis.type], parseArgs, consumeSingle[RParenthesis.type],
     consumeSingle[Colon.type], parseType, consumeSingle[Equals.type], // TODO body
-  )
+  )_
 
   val recursive = new DelegatingParser()
   val parseExpression: Parser = or(
-    new ThenParser(consumeSingle[LParenthesis.type], consumeSingle[RParenthesis.type]),
-    new ThenParserN(consumeSingle[LCurly.type], recursive, consumeSingle[RCurly.type])
+    thenConsume(consumeSingle[LParenthesis.type], consumeSingle[RParenthesis.type])_,
+    thenConsume(consumeSingle[LCurly.type], recursive, consumeSingle[RCurly.type])_
   )_
   recursive.targetParser = parseExpression // TODO
 
@@ -157,19 +157,16 @@ object ParserCalc {
       .headOption
       .orElse(Some(soFarConsumed, tokens))
 
-  def consumeMultipleAnyOfDepr(cls: Class[_ <: Token]*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = //TODO parsers instead of classes as arg
-    consumeMultipleAnyOfInternalDepr(Seq.empty, tokens, cls)
-
-  // optional
-  private def consumeMultipleAnyOfInternalDepr(soFarConsumed: Seq[Token], tokens: Seq[Token], cls: Seq[Class[_ <: Token]]): Option[(Seq[Token], Seq[Token])] =
-    tokens match {
-      case head :: tail =>
-        cls.collectFirst({ case x if x == head.getClass => (head, tail) })
-          .flatMap(matchd => consumeMultipleAnyOfInternalDepr(matchd._1 +: soFarConsumed, tail, cls))
-          .orElse(Some(soFarConsumed.reverse, tokens))
-      case Nil => Some(soFarConsumed.reverse, tokens)
+  def thenConsume(parsers: Parser*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = {
+    parsers match {
+      case Seq() => Some(Seq.empty, tokens)
+      case Seq(p, ps @ _*) =>
+        p.consume(tokens) // TODO for, yield?
+          .flatMap(pres => thenConsume(ps:_*)(pres._2).map(rest => (pres._1 ++ rest._1, rest._2)))
     }
   }
+
+}
 
 
 abstract class Parser {
@@ -194,33 +191,6 @@ abstract class SingleParser extends Parser {
       case _ => None
     }
     case _ => None
-  }
-}
-
-class ThenParser(parser1: Parser, parser2: Parser) extends Parser {
-  override def consume(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = parser1.consume(tokens) //todo for, yield?
-    .flatMap { parsed1 => {
-      parser2.consume(parsed1._2).map(parsed2 => (parsed1._1 ++ parsed2._1, parsed2._2))
-    }
-    }
-}
-
-class ThenParserN(parsers: Parser*) extends Parser {
-  override def consume(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = consumeInternal(tokens, parsers)
-  def consumeInternal(tokens: Seq[Token], parsers: Seq[Parser]): Option[(Seq[Token], Seq[Token])] = {
-    parsers match {
-      case Seq() => Some(Seq.empty, tokens)
-      case Seq(p, ps @ _*) =>
-        p.consume(tokens)
-          .flatMap(pres => {
-//            consumeInternal(pres._2, ps) match {
-//              case Some((parsed, remaining)) => Some((pres._1 ++ parsed, remaining))
-//              case None => None
-//            }
-            consumeInternal(pres._2, ps).map(rest => (pres._1 ++ rest._1, rest._2))
-          })
-
-    }
   }
 }
 
