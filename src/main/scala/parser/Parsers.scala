@@ -120,62 +120,63 @@ object ParserCalc {
   // tools
   def parse(tokens: Seq[Token], parser: Parser): String = {
     parser.consume(tokens) match {
-      case Some((parsed, Nil)) => s"SUCCESS: ${parsed}"
-      case Some((parsed, rest)) => s"FAILURE: ${parsed} but left ${rest}"
+      case Some(ParserResult(parsed, Nil)) => s"SUCCESS: ${parsed}"
+      case Some(ParserResult(parsed, rest)) => s"FAILURE: ${parsed} but left ${rest}"
       case None => "FAILURE"
     }
   }
 
-  def or(parser1: Parser, parser2: Parser)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = {
+  def or(parser1: Parser, parser2: Parser)(tokens: Seq[Token]): Option[ParserResult] = {
     parser1.consume(tokens) match {
       case Some(x) => Some(x)
       case None => parser2.consume(tokens)
     }
   }
 
-  def consumeSingle[T](tokens: Seq[Token])(implicit tag: ClassTag[T]): Option[(Seq[Token], Seq[Token])] = tokens match {
+  def consumeSingle[T](tokens: Seq[Token])(implicit tag: ClassTag[T]): Option[ParserResult] = tokens match {
     case head :: tail =>
       head match {
-        case h@tag(_: T) => Some(Seq(h), tail)
+        case h@tag(_: T) => Some(ParserResult(Seq(h), tail))
         case _ => None
       }
     case _ => None
   }
 
-  def consumeSingleAnyOf(cls: Class[_ <: Token]*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = tokens match {
-    case head :: tail => cls.collectFirst({ case x if x == head.getClass => (Seq(head), tail) })
+  def consumeSingleAnyOf(cls: Class[_ <: Token]*)(tokens: Seq[Token]): Option[ParserResult] = tokens match {
+    case head :: tail => cls.collectFirst({ case x if x == head.getClass => ParserResult(Seq(head), tail) })
     case _ => None
   }
 
   // optional
-  def consumeMultipleAnyOf(parsers: Parser*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] =
+  def consumeMultipleAnyOf(parsers: Parser*)(tokens: Seq[Token]): Option[ParserResult] =
     consumeMultipleAnyOfInternal(Seq.empty, tokens, parsers)
 
-  private def consumeMultipleAnyOfInternal(soFarConsumed: Seq[Token], tokens: Seq[Token], parsers: Seq[Parser]): Option[(Seq[Token], Seq[Token])] =
+  private def consumeMultipleAnyOfInternal(soFarConsumed: Seq[Token], tokens: Seq[Token], parsers: Seq[Parser]): Option[ParserResult] =
     parsers.view
-      .flatMap(_.consume(tokens).flatMap(pResult => consumeMultipleAnyOfInternal(soFarConsumed ++ pResult._1, pResult._2, parsers)))// TODO
+      .flatMap(_.consume(tokens).flatMap(pResult => consumeMultipleAnyOfInternal(soFarConsumed ++ pResult.parsed, pResult.notParsed, parsers)))// TODO
       .headOption
-      .orElse(Some(soFarConsumed, tokens))
+      .orElse(Some(ParserResult(soFarConsumed, tokens)))
 
-  def thenConsume(parsers: Parser*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = {
+  def thenConsume(parsers: Parser*)(tokens: Seq[Token]): Option[ParserResult] = {
     parsers match {
-      case Seq() => Some(Seq.empty, tokens)
+      case Seq() => Some(ParserResult(Seq.empty, tokens))
       case Seq(p, ps @ _*) =>
         p.consume(tokens) // TODO for, yield?
-          .flatMap(pres => thenConsume(ps:_*)(pres._2).map(rest => (pres._1 ++ rest._1, rest._2)))
+          .flatMap(pres => thenConsume(ps:_*)(pres.notParsed).map(rest => ParserResult(pres.parsed ++ rest.parsed, rest.notParsed)))
     }
   }
 
 }
 
+case class ParserResult(parsed: Seq[Token], notParsed: Seq[Token])
 
 abstract class Parser {
-  def consume(tokens: Seq[Token]) : Option[(Seq[Token], Seq[Token])]
+  def consume(tokens: Seq[Token]) : Option[ParserResult]
 }
 
 class DelegatingParser extends Parser {
   var targetParser: Parser = _
-  override def consume(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = targetParser.consume(tokens)
+  override def consume(tokens: Seq[Token]): Option[ParserResult] = targetParser.consume(tokens)
 }
 /**
  * LEARNING - ClassTag, implicit, pattern match @ tag
@@ -184,10 +185,10 @@ class DelegatingParser extends Parser {
 abstract class SingleParser extends Parser {
   type T <: Token
   def tag: ClassTag[T]
-  override def consume(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = consumeInternal(tokens)(tag)
-  def consumeInternal(tokens: Seq[Token])(/*OR implicit - that makes helluva difference*/ tag: ClassTag[T]): Option[(Seq[Token], Seq[Token])] = tokens match {
+  override def consume(tokens: Seq[Token]): Option[ParserResult] = consumeInternal(tokens)(tag)
+  def consumeInternal(tokens: Seq[Token])(/*OR implicit - that makes helluva difference*/ tag: ClassTag[T]): Option[ParserResult] = tokens match {
     case head::tail  => head match {
-      case h @ tag(_: T) => Some(Seq(h), tail) /*OR h: T + implicit above  */
+      case h @ tag(_: T) => Some(ParserResult(Seq(h), tail)) /*OR h: T + implicit above  */
       case _ => None
     }
     case _ => None
