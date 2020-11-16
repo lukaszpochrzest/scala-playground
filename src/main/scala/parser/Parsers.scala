@@ -1,6 +1,5 @@
 package parser
 
-import parser.ParserCalc.{consumeMultipleAnyOf, consumeSingleAnyOf}
 import parser.Tokenizer.tokenize
 
 import scala.reflect.ClassTag
@@ -43,12 +42,13 @@ object Parsers extends App {
 //  println(ParserCalc.parse(tokenize("a:a"), ParserCalc.parseArg))
 //  println
 
-  println(ParserCalc.parse(tokenize("def myFunction(arg1:Int)="), ParserCalc.parseFunction)) //TODO
-  println(ParserCalc.parse(tokenize("def myFunction(arg1:Int,arg2:Unit)="), ParserCalc.parseFunction))
-  println(ParserCalc.parse(tokenize("def myFunction()="), ParserCalc.parseFunction))
-  println(ParserCalc.parse(tokenize("def (arg1:Int,arg2:Unit)="), ParserCalc.parseFunction))
-  println(ParserCalc.parse(tokenize("def myFunction="), ParserCalc.parseFunction))
-  println(ParserCalc.parse(tokenize("def myFunction(Int arg1,Unit arg2)="), ParserCalc.parseFunction))
+  println(ParserCalc.parse(tokenize("def myFunction(arg1:Int,arg2:Unit):Unit="), ParserCalc.parseFunction)) //TODO
+  println(ParserCalc.parse(tokenize("def myFunction(arg1:Int,arg2:Unit,arg3:Unit,arg3:Int):Unit="), ParserCalc.parseFunction)) //TODO
+  println(ParserCalc.parse(tokenize("def myFunction(arg1:Int):Unit="), ParserCalc.parseFunction)) //TODO
+  println(ParserCalc.parse(tokenize("def myFunction():Unit="), ParserCalc.parseFunction))
+  println(ParserCalc.parse(tokenize("def (arg1:Int,arg2:Unit):Unit="), ParserCalc.parseFunction))
+  println(ParserCalc.parse(tokenize("def myFunction:Unit="), ParserCalc.parseFunction))
+  println(ParserCalc.parse(tokenize("def myFunction(Int arg1,Unit arg2):Unit="), ParserCalc.parseFunction))
   println
 
 //  println(ParserCalc.parse(tokenize("{{{()}}}"), ParserCalc.parseExpression))
@@ -100,12 +100,12 @@ object Parsers extends App {
 object ParserCalc {
   //
   // rules
-  val parseIdentifier: Parser = new ThenParser(consumeSingle[Letter], consumeMultipleAnyOf(classOf[Letter], classOf[Digit], Underscore.getClass))
+  val parseIdentifier: Parser = new ThenParser(consumeSingle[Letter], consumeMultipleAnyOfDepr(classOf[Letter], classOf[Digit], Underscore.getClass)_)
   val parseType: Parser = consumeSingleAnyOf(UnitKeyword.getClass, IntKeyword.getClass)_
   val parseArg: Parser = new ThenParser(new ThenParser(parseIdentifier, consumeSingle[Colon.type]), parseType) //TODO double TODO
-  val parseArgs: Parser = new ThenParser(new ThenParser(parseArg, consumeSingle[Comma.type]), parseArg)
+  val parseArgs: Parser = new ThenParserN(parseArg, consumeMultipleAnyOf(new ThenParser (consumeSingle[Comma.type], parseArg))_)
   val parseFunction: Parser = new ThenParserN(
-    consumeSingle[DefKeyword.type], consumeMultipleAnyOf(Whitespace.getClass)_, parseIdentifier,
+    consumeSingle[DefKeyword.type], consumeMultipleAnyOfDepr(Whitespace.getClass)_, parseIdentifier,
     consumeSingle[LParenthesis.type], parseArgs, consumeSingle[RParenthesis.type],
     consumeSingle[Colon.type], parseType, consumeSingle[Equals.type], // TODO body
   )
@@ -147,18 +147,28 @@ object ParserCalc {
     case _ => None
   }
 
-  def consumeMultipleAnyOf(cls: Class[_ <: Token]*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = //TODO parsers instead of classes as arg
-    consumeMultipleAnyOfInternal(Seq.empty, tokens, cls)
+  // optional
+  def consumeMultipleAnyOf(parsers: Parser*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] =
+    consumeMultipleAnyOfInternal(Seq.empty, tokens, parsers)
 
-  private def consumeMultipleAnyOfInternal(soFarConsumed: Seq[Token], tokens: Seq[Token], cls: Seq[Class[_ <: Token]]): Option[(Seq[Token], Seq[Token])] =
+  private def consumeMultipleAnyOfInternal(soFarConsumed: Seq[Token], tokens: Seq[Token], parsers: Seq[Parser]): Option[(Seq[Token], Seq[Token])] =
+    parsers.view
+      .flatMap(_.consume(tokens).flatMap(pResult => consumeMultipleAnyOfInternal(soFarConsumed ++ pResult._1, pResult._2, parsers)))// TODO
+      .headOption
+      .orElse(Some(soFarConsumed, tokens))
+
+  def consumeMultipleAnyOfDepr(cls: Class[_ <: Token]*)(tokens: Seq[Token]): Option[(Seq[Token], Seq[Token])] = //TODO parsers instead of classes as arg
+    consumeMultipleAnyOfInternalDepr(Seq.empty, tokens, cls)
+
+  // optional
+  private def consumeMultipleAnyOfInternalDepr(soFarConsumed: Seq[Token], tokens: Seq[Token], cls: Seq[Class[_ <: Token]]): Option[(Seq[Token], Seq[Token])] =
     tokens match {
       case head :: tail =>
         cls.collectFirst({ case x if x == head.getClass => (head, tail) })
-          .flatMap(matchd => consumeMultipleAnyOfInternal(matchd._1 +: soFarConsumed, tail, cls))
+          .flatMap(matchd => consumeMultipleAnyOfInternalDepr(matchd._1 +: soFarConsumed, tail, cls))
           .orElse(Some(soFarConsumed.reverse, tokens))
       case Nil => Some(soFarConsumed.reverse, tokens)
     }
-
   }
 
 
@@ -219,7 +229,7 @@ class ThenParserN(parsers: Parser*) extends Parser {
  */
 object Tokenizer {
 
-  val keywords = List(IntKeyword, UnitKeyword)
+  val keywords = List(IntKeyword, UnitKeyword, DefKeyword)
 
   def tokenize(input: String): List[Token] = {
     if(input.isEmpty)
@@ -280,10 +290,12 @@ class Letter(val value:Char) extends Token {
 class Digit(val value:Char) extends Token {
   override def toString: String = s"Digit(${value})"
 }
-object Whitespace extends Token
+object Whitespace extends Token {
+  override def toString: String = " "
+}
 object Underscore extends Token
 object Colon extends Token {
-  override def toString: String = "Colon"
+  override def toString: String = ":"
 }
 object Comma extends Token
 object LParenthesis extends Token {
@@ -292,7 +304,9 @@ object LParenthesis extends Token {
 object RParenthesis extends Token {
   override def toString: String = ")"
 }
-object Equals extends Token
+object Equals extends Token {
+  override def toString: String = "="
+}
 object LCurly extends Token {
   override def toString: String = "{"
 }
